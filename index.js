@@ -3,8 +3,9 @@ const fs = require('fs');
 const pdf = require('pdf-parse');
 const path = require('path');
 const Papa = require('papaparse');
-const openAiapiKey='api-key-here'
-const extractRequestData = async (context) => {
+const openAiapiKey = '';
+const extractRequestData = async (extractedContext) => {
+  const context = extractedContext.trim().replace(/\n/g, ' ');
   const openai = new OpenAI({
     apiKey: openAiapiKey,
   });
@@ -151,6 +152,7 @@ const extractRequestData = async (context) => {
     website: '',
     socialMedia: '',
     demo: '',
+    inputContext: '',
   };
   if (jsonOutput.founded) {
     try {
@@ -176,6 +178,7 @@ const extractRequestData = async (context) => {
       delete jsonOutput[key];
     }
   });
+  jsonOutput.inputContext = context;
   return jsonOutput;
 };
 
@@ -204,6 +207,7 @@ const defaultCsvHeaders = {
   website: 'N/A',
   socialMedia: 'N/A',
   demo: 'N/A',
+  inputContext: 'N/A',
 };
 
 function formatISODateToCustom(isoString) {
@@ -249,7 +253,9 @@ const convertToCsv = async (data) => {
       flattenObject.founded = formatISODateToCustom(item.founded);
     }
     if (item.lastFundingYear) {
-      flattenObject.lastFundingYear = formatISODateToCustom(item.lastFundingYear);
+      flattenObject.lastFundingYear = formatISODateToCustom(
+        item.lastFundingYear
+      );
     }
     return flattenObject;
   });
