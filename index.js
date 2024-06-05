@@ -3,7 +3,57 @@ const fs = require('fs');
 const pdftopic = require('pdftopic');
 const path = require('path');
 const Papa = require('papaparse');
-const openAiapiKey = 'key';
+const openAiapiKey = 'api-key';
+
+const main = async () => {
+  const startTime = logCurrentTime();
+  console.log('Job started at ' + startTime);
+  const pdfFiles = getFiles();
+  const extractedDetailsPromise = [];
+  for (const { file, filePath } of pdfFiles) {
+    console.log(`Conversion of pdf to image started (${file})`);
+    const base64Strings = await convertToBase64Strings(filePath);
+    console.log(`Conversion of pdf to image completed (${file})`);
+    const promise = backgroundExtraction(base64Strings, file);
+    extractedDetailsPromise.push(promise);
+  }
+  const extractedDetails = await Promise.all(extractedDetailsPromise);
+  await convertToCsv(extractedDetails);
+  const endTime = logCurrentTime();
+  console.log('Wow! Its done!');
+  console.log('Job started at ' + startTime);
+  console.log('Job finshed at ' + endTime);
+};
+
+main();
+function getFiles() {
+  const pdfFolder = './pdfFiles';
+  const pdfFiles = fs
+    .readdirSync(pdfFolder)
+    .filter((file) => path.extname(file) === '.pdf')
+    .map((file) => {
+      const filePath = path.join(pdfFolder, file);
+      return { file, filePath };
+    });
+  return pdfFiles;
+}
+async function backgroundExtraction(base64Strings, file) {
+  console.log(`Context extraction of started (${file})`);
+  const context = await extractPdfContextWithAi(base64Strings, file);
+  console.log(`Context extraction of completed (${file})`);
+  console.log(`Request data analysis of started (${file})`);
+  const jsonResponse = await extractRequestData(context, file);
+  console.log(`Request data analysis of completed (${file})`);
+  jsonResponse.file = file;
+  jsonResponse.inputContext = context;
+  return jsonResponse;
+}
+async function convertToBase64Strings(pdfPath) {
+  const curriculum_vitae = fs.readFileSync(pdfPath);
+  return await pdftopic
+    .pdftobuffer(curriculum_vitae, 'all')
+    .then((buffers) => buffers.map((buffer) => buffer.toString('base64')));
+}
 const defaultCsvHeaders = {
   companyName: 'N/A',
   description: 'N/A',
@@ -23,10 +73,86 @@ const defaultCsvHeaders = {
   socialMedia: 'N/A',
   demo: 'N/A',
   inputContext: 'N/A',
+  file: 'N/A',
 };
-const extractRequestData = async (extractedContext, file) => {
+async function extractPdfContextWithAi(base64Strings, file) {
   try {
-    const context = extractedContext.trim().replace(/\n/g, ' ');
+    const openai = new OpenAI({
+      apiKey: openAiapiKey,
+    });
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4-turbo',
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are an information collecting tool from the pitchdeck of a company',
+        },
+        {
+          role: 'system',
+          content: `The informations found by you will be used by the venture capitals to find the portfolio company is a good match for them to invest`,
+        },
+        {
+          role: 'system',
+          content: `The pitchdeck might contain graphical representaions, visual representation and textual representation , interpret all the representations while generating the response`,
+        },
+        {
+          role: 'system',
+          content: `The details to find from the images are :-
+        1. companyName is the name of the company, never guess the name , if you cannot find say not available.
+        2. description is the description about the company ( you can create a good description by your own from the context of all images ).
+        3. marketType is the market the company focuses on. Determine whether the company primarily targets business-to-business (B2B), business-to-consumer (B2C), or both. Make an educated guess based on the detailed description of the company's offerings, target audience, distribution channels, and sales approach if the market type is not explicitly mentioned in the context. Consider factors such as the nature of the product/service, customer demographics, and intended market reach to accurately suggest the market type, even after you connot find the market type say not available.
+        4. keywords is the array of keywords fitting for the company. For example: Aerospace, AI, Fintech, AdTech, try to capture keywords from the words that would be relevant for a venture capitalist to evaluate a startup, if you cannot extract any keywords return and empty array.
+        5. revenue is the revenue or ARR (Annual Recurring Revenue) of the company, if you find Monthly Recurring Revenue just multiply that value with 12, don't give wrong or hallucinating data. if you can't find anything, just say not available.
+        6. latestMonthlyRevenue latest monthly revenue is the latest monthly revenue of the company explicitly mentioned in the context, if you cannot find say not available.
+        7. currency is the currency in which the annual revenue or latest monthly revenue is mentioned, if you cannot find say not available.
+        8. countryOfOrigin is the country of origin of the company or where the company is originated from, never use short forms of the countries instead use the full form , example United kingdom for UK, United state of America for USA , United Arab Emirites for UAE etc...
+        9. countryOfOperation is the array of countries where the company is functioning.
+        10. founded is date of incorporation of the company.
+        11. lastFundingRound is the last funding round of the company where the investment stage of the company. Look for indications of funding rounds mentioned in the pitch deck or reflected in the file name, such as seed funding, Series A, Series B, etc. Prioritize extracting specific funding details or milestones mentioned in the pitch deck to infer the investment stage accurately.if you can't find anything then assume that it's a New Startup and return "Pre-Seed", if you cannot find say not available.
+        12. lastFundingYear is the date where the last funding round done, if you cannot find say not available.
+        13. nextFundingRound is the next funding round, which the company is planning to get investments, if you cannot find say not available.
+        14. nextFundingTarget is the targeted investment of the company in the next funding round, if you cannot find say not available.
+        15. website is the marketing website of the company.
+        16. socialMedia is the social media link of the company.
+        17. demo is the link to the demo vedio of the company explicitly mentioned in the context.`,
+        },
+        {
+          role: 'system',
+          content:
+            'Keep in mind that never guess and give a random answer, if you cannot find the information just say is not availible',
+        },
+        {
+          role: 'system',
+          content: 'Each page will be given to you as images',
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: 'Each page of the pitchdeck are here, find the details described',
+            },
+            ...base64Strings.map((base64) => ({
+              type: 'image_url',
+              image_url: {
+                url: `data:image/jpeg;base64,${base64}`,
+              },
+            })),
+          ],
+        },
+      ],
+    });
+    const answer = response.choices[0].message.content;
+    return answer.trim().replace(/\n/g, ' ');
+  } catch (error) {
+    console.log('\n' + 'Error while context extraction of ' + file);
+    console.log(error?.error?.message || error, '\n');
+    return JSON.stringify(defaultCsvHeaders);
+  }
+}
+async function extractRequestData(context, file) {
+  try {
     const openai = new OpenAI({
       apiKey: openAiapiKey,
     });
@@ -136,10 +262,11 @@ const extractRequestData = async (extractedContext, file) => {
           content: `Analyse and give the output`,
         },
       ],
-      model: 'gpt-3.5-turbo',
+      model: 'gpt-4-turbo',
     });
+    
     const answer = chatCompletion.choices[0].message.content;
-    const jsonRegex = /\{.*?\}/;
+    const jsonRegex = /\{[\s\S]*?\}/;
     const jsonString = answer.match(jsonRegex);
     const jsonOutput = JSON.parse(jsonString[0]);
     const comparisonOutput = {
@@ -161,6 +288,7 @@ const extractRequestData = async (extractedContext, file) => {
       socialMedia: '',
       demo: '',
       inputContext: '',
+      file: '',
     };
     if (jsonOutput.founded) {
       try {
@@ -186,124 +314,15 @@ const extractRequestData = async (extractedContext, file) => {
         delete jsonOutput[key];
       }
     });
-    jsonOutput.inputContext = context;
     return jsonOutput;
   } catch (error) {
     console.log('\n Error while analysing request details of ' + file);
     console.log(error?.error?.message || error, '\n');
     return {};
   }
-};
-const toBase64Strings = async (pdfPath) => {
-  const curriculum_vitae = fs.readFileSync(pdfPath);
-  return await pdftopic
-    .pdftobuffer(curriculum_vitae, 'all')
-    .then((buffers) => buffers.map((buffer) => buffer.toString('base64')));
-};
-
-const extractPdfContextWithAi = async (base64Strings, file) => {
-  try {
-    const openai = new OpenAI({
-      apiKey: openAiapiKey,
-    });
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4-turbo',
-      messages: [
-        {
-          role: 'system',
-          content:
-            'You are an information collecting tool from the pitchdeck of a company',
-        },
-        {
-          role: 'system',
-          content: `The informations found by you will be used by the venture capitals to find the portfolio company is a good match for them to invest`,
-        },
-        {
-          role: 'system',
-          content: `The pitchdeck might contain graphical representaions, visual representation and textual representation , interpret all the representations while generating the response`,
-        },
-        {
-          role: 'system',
-          content: `The details to find from the images are :-
-        1. companyName is the name of the company, never guess the name , if you cannot find say not available.
-        2. description is the description about the company ( you can create a good description by your own from the context of all images ).
-        3. marketType is the market the company focuses on. Determine whether the company primarily targets business-to-business (B2B), business-to-consumer (B2C), or both. Make an educated guess based on the detailed description of the company's offerings, target audience, distribution channels, and sales approach if the market type is not explicitly mentioned in the context. Consider factors such as the nature of the product/service, customer demographics, and intended market reach to accurately suggest the market type, even after you connot find the market type say not available.
-        4. keywords is the array of keywords fitting for the company. For example: Aerospace, AI, Fintech, AdTech, try to capture keywords from the words that would be relevant for a venture capitalist to evaluate a startup, if you cannot extract any keywords return and empty array.
-        5. revenue is the revenue or ARR (Annual Recurring Revenue) of the company, if you find Monthly Recurring Revenue just multiply that value with 12, don't give wrong or hallucinating data. if you can't find anything, just say not available.
-        6. latestMonthlyRevenue latest monthly revenue is the latest monthly revenue of the company explicitly mentioned in the context, if you cannot find say not available.
-        7. currency is the currency in which the annual revenue or latest monthly revenue is mentioned, if you cannot find say not available.
-        8. countryOfOrigin is the country of origin of the company or where the company is originated from, never use short forms of the countries instead use the full form , example United kingdom for UK, United state of America for USA , United Arab Emirites for UAE etc...
-        9. countryOfOperation is the array of countries where the company is functioning.
-        10. founded is date of incorporation of the company.
-        11. lastFundingRound is the last funding round of the company where the investment stage of the company. Look for indications of funding rounds mentioned in the pitch deck or reflected in the file name, such as seed funding, Series A, Series B, etc. Prioritize extracting specific funding details or milestones mentioned in the pitch deck to infer the investment stage accurately.if you can't find anything then assume that it's a New Startup and return "Pre-Seed", if you cannot find say not available.
-        12. lastFundingYear is the date where the last funding round done, if you cannot find say not available.
-        13. nextFundingRound is the next funding round, which the company is planning to get investments, if you cannot find say not available.
-        14. nextFundingTarget is the targeted investment of the company in the next funding round in millions, if you cannot find say not available.
-        15. website is the marketing website of the company.
-        16. socialMedia is the social media link of the company.
-        17. demo is the link to the demo vedio of the company explicitly mentioned in the context.`,
-        },
-        {
-          role: 'system',
-          content:
-            'Keep in mind that never guess and give a random answer, if you cannot find the information just say is not availible',
-        },
-        {
-          role: 'system',
-          content: 'Each page will be given to you as images',
-        },
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: 'Each page of the pitchdeck are here, find the details described',
-            },
-            ...base64Strings.map((base64) => ({
-              type: 'image_url',
-              image_url: {
-                url: `data:image/jpeg;base64,${base64}`,
-              },
-            })),
-          ],
-        },
-      ],
-    });
-    const answer = response.choices[0].message.content;
-    return answer;
-  } catch (error) {
-    console.log('\n' + 'Error while context extraction of ' + file);
-    console.log(error?.error?.message || error, '\n');
-    return JSON.stringify(defaultCsvHeaders);
-  }
-};
-
-function formatISODateToCustom(isoString) {
-  const date = new Date(isoString);
-
-  const monthAbbreviations = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ];
-
-  const month = date.getMonth();
-  const year = date.getFullYear();
-
-  // Format the result as "MMM - YYYY"
-  return `${monthAbbreviations[month]} - ${year}`;
 }
 
-const convertToCsv = async (data) => {
+async function convertToCsv(data) {
   const flattenData = data.map((item) => {
     const flattenObject = { ...defaultCsvHeaders };
     Object.entries(flattenObject).map(([key]) => {
@@ -333,17 +352,10 @@ const convertToCsv = async (data) => {
     `./csvFiles/alfred_exported_data_${new Date()}.csv`,
     csvBuffer
   );
-};
+}
 
-const backgroundExtraction = async (base64Strings, file) => {
-  console.log('Context extraction of ' + file + ' started');
-  const context = await extractPdfContextWithAi(base64Strings, file);
-  console.log('Context extraction of ' + file + ' end');
-  console.log('Request data analysis of ' + file + ' started');
-  const jsonResponse = await extractRequestData(context, file);
-  console.log('Request data analysis of ' + file + ' end');
-  return jsonResponse;
-};
+// Call the function to log the current time
+
 function logCurrentTime() {
   const now = new Date();
   let hours = now.getHours();
@@ -364,31 +376,27 @@ function logCurrentTime() {
   return timeString;
 }
 
-// Call the function to log the current time
+function formatISODateToCustom(isoString) {
+  const date = new Date(isoString);
 
-const main = async () => {
-  const startTime = logCurrentTime();
-  console.log('Job started at ' + startTime);
-  const pdfFolder = './pdfFiles';
-  const pdfFiles = fs
-    .readdirSync(pdfFolder)
-    .filter((file) => path.extname(file) === '.pdf');
-  const extractedDetailsPromise = [];
-  for (const file of pdfFiles) {
-    const filePath = path.join(pdfFolder, file);
-    console.log('Conversion of ' + file + ' to image is started');
-    await toBase64Strings(filePath).then((base64Strings) => {
-      console.log('Conversion of ' + file + ' to image is end');
-      const promise = backgroundExtraction(base64Strings, file);
-      extractedDetailsPromise.push(promise);
-    });
-  }
-  const extractedDetails = await Promise.all(extractedDetailsPromise);
-  await convertToCsv(extractedDetails);
-  const endTime = logCurrentTime();
-  console.log('Wow! Its done!');
-  console.log('Job started at ' + startTime);
-  console.log('Job finshed at ' + endTime);
-};
+  const monthAbbreviations = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
 
-main();
+  const month = date.getMonth();
+  const year = date.getFullYear();
+
+  // Format the result as "MMM - YYYY"
+  return `${monthAbbreviations[month]} - ${year}`;
+}
