@@ -3,7 +3,7 @@ const fs = require('fs');
 const pdftopic = require('pdftopic');
 const path = require('path');
 const Papa = require('papaparse');
-const openAiapiKey = 'sk-proj-86MD8TWKoSF2w3awUBdnT3BlbkFJgdUZeTtT6FOOfZF3Vc49';
+const openAiapiKey = 'key';
 const defaultCsvHeaders = {
   companyName: 'N/A',
   description: 'N/A',
@@ -34,17 +34,7 @@ const extractRequestData = async (extractedContext, file) => {
       messages: [
         {
           role: 'system',
-          content:
-            'Understand what is a venture capital, portfolio company and the pitchdeck of the portfolio company from internet',
-        },
-        {
-          role: 'system',
           content: `Context to analyse is ${context}`,
-        },
-        {
-          role: 'system',
-          content:
-            'You are a information collecting tool from the context extracted from a pitchdeck of a portfolio company using a pdf parsing tool called pdf parser',
         },
 
         {
@@ -57,29 +47,24 @@ const extractRequestData = async (extractedContext, file) => {
         },
         {
           role: 'system',
-          content: `find if the website information is availible in the context, if it is availible understand about the compnay from the website aswell and consider the informations from the website along with the provided context while analysing the context`,
-        },
-
-        {
-          role: 'system',
-          content: `The respose must be in the following format {
-                  companyName:name of company,
-                  description: description of company,
-                  marketType: market type of company,
-                  keywords: array of  keywords suitable for the company,
-                  revenue: revenue of company,
-                  latestMonthlyRevenue:latest monthly revenue,
-                  currency:currency where the revenue is described,
-                  countryOfOrigin: country of company where it initially founded,
-                  countryOfOperation:countries where the company is functioning,
-                  founded: date at which the company is founded,
-                  lastFundingRound:last funding round,
-                  lastFundingYear:last funding year,
-                  nextFundingRound:next funding round,
-                  nextFundingTarget:next funding target in millions,
-                  website:website of the company,
-                  socialMedia:social media link,
-                  demo:demo link
+          content: `The respose must be in the following json format {
+                  "companyName":name of company,
+                  "description": description of company,
+                  "marketType": market type of company,
+                  "keywords": array of  keywords suitable for the company,
+                  "revenue": revenue of company,
+                  "latestMonthlyRevenue":latest monthly revenue,
+                  "currency":currency where the revenue is described,
+                  "countryOfOrigin": country of company where it initially founded,
+                  "countryOfOperation":countries where the company is functioning,
+                  "founded": date at which the company is founded,
+                  "lastFundingRound":last funding round,
+                  "lastFundingYear":last funding year,
+                  "nextFundingRound":next funding round,
+                  "nextFundingTarget":next funding target in millions,
+                  "website":website of the company,
+                  "socialMedia":social media link,
+                  "demo":demo link
                   }`,
         },
         {
@@ -113,23 +98,23 @@ const extractRequestData = async (extractedContext, file) => {
           role: 'system',
           content: `The type of the parsed Json must be 
                 {
-                  companyName:string | null;
-                  description: string | null;
-                  marketType: string | null;
-                  keywords: string[];
-                  revenue: number | null;
-                  currency:string | null;
-                  countryOfOrigin: string | null;
-                  countryOfOperation:string[];
-                  founded:string | null;
-                  lastFundingRound:string | null;
-                  lastFundingYear:string | null;
-                  nextFundingRound:string | null;
-                  nextFundingTarget:number | null; 
-                  latestMonthlyRevenue:number | null;
-                  website:string | null;
-                  socialMedia:string | null;
-                  demo:string | null;
+                  "companyName":string | null;
+                  "description": string | null;
+                  "marketType": string | null;
+                  "keywords": string[];
+                  "revenue": number | null;
+                  "currency":string | null;
+                  "countryOfOrigin": string | null;
+                  "countryOfOperation":string[];
+                  "founded":string | null;
+                  "lastFundingRound":string | null;
+                  "lastFundingYear":string | null;
+                  "nextFundingRound":string | null;
+                  "nextFundingTarget":number | null; 
+                  "latestMonthlyRevenue":number | null;
+                  "website":string | null;
+                  "socialMedia":string | null;
+                  "demo":string | null;
                 }`,
         },
 
@@ -154,7 +139,9 @@ const extractRequestData = async (extractedContext, file) => {
       model: 'gpt-3.5-turbo',
     });
     const answer = chatCompletion.choices[0].message.content;
-    const jsonOutput = JSON.parse(answer);
+    const jsonRegex = /\{.*?\}/;
+    const jsonString = answer.match(jsonRegex);
+    const jsonOutput = JSON.parse(jsonString[0]);
     const comparisonOutput = {
       companyName: '',
       description: '',
@@ -239,8 +226,8 @@ const extractPdfContextWithAi = async (base64Strings, file) => {
           role: 'system',
           content: `The details to find from the images are :-
         1. companyName is the name of the company, never guess the name , if you cannot find say not available.
-        2. description is the description about the company ( you can create a good description by your own from the context only at this field ).
-        3. marketType is the market the company focuses on. Determine whether the company primarily targets business-to-business (B2B), business-to-consumer (B2C), or both. Make an educated guess based on the detailed description of the company's offerings, target audience, distribution channels, and sales approach if the market type is not explicitly mentioned in the context. Consider factors such as the nature of the product/service, customer demographics, and intended market reach to accurately suggest the market type, if you connot find the market type say not available.
+        2. description is the description about the company ( you can create a good description by your own from the context of all images ).
+        3. marketType is the market the company focuses on. Determine whether the company primarily targets business-to-business (B2B), business-to-consumer (B2C), or both. Make an educated guess based on the detailed description of the company's offerings, target audience, distribution channels, and sales approach if the market type is not explicitly mentioned in the context. Consider factors such as the nature of the product/service, customer demographics, and intended market reach to accurately suggest the market type, even after you connot find the market type say not available.
         4. keywords is the array of keywords fitting for the company. For example: Aerospace, AI, Fintech, AdTech, try to capture keywords from the words that would be relevant for a venture capitalist to evaluate a startup, if you cannot extract any keywords return and empty array.
         5. revenue is the revenue or ARR (Annual Recurring Revenue) of the company, if you find Monthly Recurring Revenue just multiply that value with 12, don't give wrong or hallucinating data. if you can't find anything, just say not available.
         6. latestMonthlyRevenue latest monthly revenue is the latest monthly revenue of the company explicitly mentioned in the context, if you cannot find say not available.
