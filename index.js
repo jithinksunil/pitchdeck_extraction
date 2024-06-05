@@ -3,7 +3,7 @@ const fs = require('fs');
 const pdftopic = require('pdftopic');
 const path = require('path');
 const Papa = require('papaparse');
-const openAiapiKey = 'api-key';
+const openAiapiKey = 'sk-proj-86MD8TWKoSF2w3awUBdnT3BlbkFJgdUZeTtT6FOOfZF3Vc49';
 const defaultCsvHeaders = {
   companyName: 'N/A',
   description: 'N/A',
@@ -204,7 +204,7 @@ const extractRequestData = async (extractedContext, file) => {
   } catch (error) {
     console.log('\n Error while analysing request details of ' + file);
     console.log(error?.error?.message || error, '\n');
-    return defaultCsvHeaders;
+    return {};
   }
 };
 const toBase64Strings = async (pdfPath) => {
@@ -324,19 +324,16 @@ const convertToCsv = async (data) => {
         flattenObject[key] = item[key];
       }
     });
-    if (
-      item?.countryOfOperation?.length &&
-      typeof item?.countryOfOperation === 'object'
-    ) {
+    if (item?.countryOfOperation?.length) {
       flattenObject.countryOfOperation = item.countryOfOperation.join(', ');
     }
-    if (item?.keywords?.length && typeof item?.keywords === 'object') {
+    if (item?.keywords?.length) {
       flattenObject.keywords = item.keywords.join(', ');
     }
-    if (item.founded && item.founded !== 'N/A') {
+    if (item.founded) {
       flattenObject.founded = formatISODateToCustom(item.founded);
     }
-    if (item.lastFundingYear && item.lastFundingYear !== 'N/A') {
+    if (item.lastFundingYear) {
       flattenObject.lastFundingYear = formatISODateToCustom(
         item.lastFundingYear
       );
@@ -400,7 +397,6 @@ const main = async () => {
     });
   }
   const extractedDetails = await Promise.all(extractedDetailsPromise);
-  console.log(extractedDetails);
   await convertToCsv(extractedDetails);
   const endTime = logCurrentTime();
   console.log('Wow! Its done!');
