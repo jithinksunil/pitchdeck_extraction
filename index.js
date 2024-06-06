@@ -3,7 +3,9 @@ const fs = require('fs');
 const pdftopic = require('pdftopic');
 const path = require('path');
 const Papa = require('papaparse');
-const openAiapiKey = 'api-key';
+const dotenv=require('dotenv')
+dotenv.config()
+const openAiapiKey = process.env.OPENAI_API_KEY
 
 const main = async () => {
   const startTime = logCurrentTime();
