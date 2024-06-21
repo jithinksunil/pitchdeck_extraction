@@ -4,7 +4,13 @@ const path = require('path');
 const pdftopic = require('pdftopic');
 const Papa = require('papaparse');
 const dotenv = require('dotenv');
+const cloudinary = require('cloudinary');
 dotenv.config();
+cloudinary.v2.config({
+  cloud_name: 'df8w69xon',
+  api_key: '818129511951146',
+  api_secret: '_R4yasVlyG3hpD01R8M1Fbz4i6I',
+});
 const openAiapiKey = process.env.OPENAI_API_KEY;
 
 const main = async () => {
@@ -14,9 +20,9 @@ const main = async () => {
   const extractedDetailsPromise = [];
   for (const { file, filePath } of pdfFiles) {
     console.log(`Conversion of pdf to image started (${file})`);
-    const base64Strings = await convertToBase64Strings(filePath);
+    const bufferArray = await convertToImageBufferArray(filePath);
     console.log(`Conversion of pdf to image completed (${file})`);
-    const promise = backgroundExtraction(base64Strings, file);
+    const promise = backgroundExtraction(bufferArray, file);
     extractedDetailsPromise.push(promise);
   }
   const extractedDetails = await Promise.all(extractedDetailsPromise);
@@ -39,9 +45,9 @@ function getFiles() {
     });
   return pdfFiles;
 }
-async function backgroundExtraction(base64Strings, file) {
+async function backgroundExtraction(bufferArray, file) {
   console.log(`Context extraction of started (${file})`);
-  const context = await extractPdfContextWithAi(base64Strings, file);
+  const context = await extractPdfContextWithAi(bufferArray, file);
   console.log(`Context extraction of completed (${file})`);
   console.log(`Request data analysis of started (${file})`);
   const jsonResponse = await extractRequestData(context, file);
@@ -50,11 +56,9 @@ async function backgroundExtraction(base64Strings, file) {
   jsonResponse.inputContext = context;
   return jsonResponse;
 }
-async function convertToBase64Strings(pdfPath) {
+async function convertToImageBufferArray(pdfPath) {
   const curriculum_vitae = fs.readFileSync(pdfPath);
-  return await pdftopic
-    .pdftobuffer(curriculum_vitae, 'all')
-    .then((buffers) => buffers.map((buffer) => buffer.toString('base64')));
+  return await pdftopic.pdftobuffer(curriculum_vitae, 'all');
 }
 const defaultCsvHeaders = {
   file: 'N/A',
@@ -77,84 +81,118 @@ const defaultCsvHeaders = {
   demo: 'N/A',
   inputContext: 'N/A',
 };
-async function extractPdfContextWithAi(base64Strings, file) {
+async function extractPdfContextWithAi(bufferArray, file) {
   try {
-    const openai = new OpenAI({
-      apiKey: openAiapiKey,
-    });
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4-turbo',
-      messages: [
-        {
-          role: 'system',
-          content:
-            'You are an advanced information extraction assistant. Your task is to extract specific details from the pitch decks of companies. The information you provide will be used by venture capitals to assess potential investments. Ensure each detail is 100% accurate, and if you are unsure about the accuracy, respond with "not available".',
-        },
-        {
-          role: 'system',
-          content: `The pitch decks may contain textual, graphical, and visual representations. Interpret all forms of content while generating your response. Never guess or provide inaccurate details.`,
-        },
-        {
-          role: 'system',
-          content: `You need to find the following details from the images. If you cannot find a detail or if you are not 100% sure about its accuracy, respond with "not available":
-          1. **companyName**: The name of the company. Do not guess; if not found, say "not available".
-          2. **description**: A description of the company based on the context of all images. Create a comprehensive summary if possible.
-          3. **marketType**: Identify if the company targets B2B, B2C, or both. Make an educated guess based on offerings, audience, and channels if not explicitly mentioned. If unsure, say "not available".
-          4. **keywords**: An array of relevant keywords (e.g., Aerospace, AI, Fintech). If no keywords are found, say "not available".
-          5. **countryOfOrigin**: The country where the company was founded. Use full country names (e.g., United Kingdom, United States of America). If not found, say "not available".
-          6. **countryOfOperation**: An array of countries where the company operates. Use full country names. If no country of operation is found, say "not available".
-          7. **founded**: The date the company was founded. If not found, say "not available".
-          8. **lastFundingRound**: The most recent funding round (e.g., Pre-Seed, Seed, Pre-Series A, Series A, Series B, Series C). Assume "Pre-Seed" if not found from images and the company is new. If not found, say "not available".
-          9. **lastFundingYear**: The year of the most recent funding round. If not found, say "not available".
-          10. **nextFundingRound**: The next planned funding round explicitly mentioned. If the last funding round is available but the next funding round is not explicitly mentioned, use the following logic: 
-          - If the last funding round is Pre-Seed, the next funding round is Seed.
-          - If the last funding round is Seed, the next funding round is Pre-Series A.
-          - If the last funding round is Pre-Series A, the next funding round is Series A.
-          - If the last funding round is Series A, the next funding round is Series B.
-          - If the last funding round is Series B, the next funding round is Series C.
-          - If the last funding round is Series C, respond with "not available".
-          If both last and next funding rounds are not found, respond with "not available".
-          11. **nextFundingTarget**: The target amount for the next funding round converted to USD. If nextFundingTarget is converted to USD, give only the USD value. If not found, say "not available".
-          12. **latestMonthlyRevenue**: The latest monthly revenue figure converted to USD. If MRR is not available and revenue is present then divide revenue with 12 and consider as MRR then convert it to USD. If MRR is converted to USD, give only the USD value. If both MRR and revenue is not found, say "not available".
-          13. **revenue**: The company's annual revenue (ARR) converted to USD. If revenue is not available and Monthly Recurring Revenue (MRR) is found, multiply by 12 and consider as revenue then convert it to USD.If revenue is converted to USD, give only the USD value. If both revenue and MRR is not found, say "not available".
-          14. **currency**: Use USD if the revenue, MRR and next funding target is converted to USD.If not converted use the currency with revenue figures. If not found, say "not available".
-          15. **website**: If the company's website URL is explicitly mentioned, extract and provide it. If website URL is not explicitly mentioned but one of the domain based business email address is present, then infer this domain as the website url ( like email@example.com then website will be example.com ). I repeat that you can only infer website url from email only if the email address is a business email address based on the company's domain. If not found, say "not available".
-          16. **socialMedia**: Links to the company's social media profiles, which are explicitly mentioned. If not found, say "not available".
-          17. **demo**: A link to the company's demo video, which is explicitly mentioned. If not found, say "not available".`,
-        },
-        {
-          role: 'system',
-          content: `Use your last updated values for currency conversion`,
-        },
-        {
-          role: 'system',
-          content: `Always prioritize accuracy. If you are not sure about a detail, respond with "not available".`,
-        },
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: 'Each page of the pitch deck is here. Extract the described details from these images:',
-            },
-            ...base64Strings.map((base64) => ({
-              type: 'image_url',
-              image_url: {
-                url: `data:image/jpeg;base64,${base64}`,
-              },
-            })),
-          ],
-        },
-      ],
-    });
-    const answer = response.choices[0].message.content;
-    console.log(answer);
-    return answer.trim().replace(/\n/g, ' ');
+    const urls = buffersToUrls(bufferArray.sv.jithin);
+    return await contextExtractionPrompts(urls);
   } catch (error) {
-    console.log('\n' + 'Error while context extraction of ' + file);
-    console.log(error?.error?.message || error, '\n');
-    return JSON.stringify(defaultCsvHeaders);
+    console.log(error);
+    try {
+      if (error?.status == 429) {
+        console.log(
+          'Started uploading Pdfs to cloud as images dues to token limit error'
+        );
+        const uploadPromises = bufferArray.map((buffer) =>
+          uploadToCloud(buffer)
+        );
+        const uploads = (await Promise.allSettled(uploadPromises))
+          .filter((promise) => promise.status == 'fulfilled')
+          .map((promise) => promise.value);
+        console.log('Completed uploading Pdfs to cloud ' + `(${file})`);
+        const answer = await contextExtractionPrompts(
+          uploads.map(({ url }) => url)
+        );
+        console.log('Deleting from cloud ' + `(${file})`);
+        uploads.map(({ public_id }) =>
+          deleteFromCloud(public_id).catch((err) => console.log(err))
+        );
+        return answer;
+      }
+      throw new Error(error);
+    } catch (error) {
+      console.log('\n' + 'Error while context extraction of ' + file);
+      console.log(error?.error?.message || error, '\n');
+      return JSON.stringify(defaultCsvHeaders);
+    }
   }
+}
+
+async function contextExtractionPrompts(urls) {
+  const openai = new OpenAI({
+    apiKey: openAiapiKey,
+  });
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4-turbo',
+    messages: [
+      {
+        role: 'system',
+        content:
+          'You are an advanced information extraction assistant. Your task is to extract specific details from the pitch decks of companies. The information you provide will be used by venture capitals to assess potential investments. Ensure each detail is 100% accurate, and if you are unsure about the accuracy, respond with "not available".',
+      },
+      {
+        role: 'system',
+        content: `The pitch decks may contain textual, graphical, and visual representations. Interpret all forms of content while generating your response. Never guess or provide inaccurate details.`,
+      },
+      {
+        role: 'system',
+        content: `You need to find the following details from the images. If you cannot find a detail or if you are not 100% sure about its accuracy, respond with "not available":
+        1. **companyName**: The name of the company. Do not guess; if not found, say "not available".
+        2. **description**: A description of the company based on the context of all images. Create a comprehensive summary if possible.
+        3. **marketType**: Identify if the company targets B2B, B2C, or both. Make an educated guess based on offerings, audience, and channels if not explicitly mentioned. If unsure, say "not available".
+        4. **keywords**: An array of relevant keywords (e.g., Aerospace, AI, Fintech). If no keywords are found, say "not available".
+        5. **countryOfOrigin**: The country where the company was founded. Use full country names (e.g., United Kingdom, United States of America). If not found, say "not available".
+        6. **countryOfOperation**: An array of countries where the company operates. Use full country names. If no country of operation is found, say "not available".
+        7. **founded**: The date the company was founded. If not found, say "not available".
+        8. **lastFundingRound**: The most recent funding round (e.g., Pre-Seed, Seed, Pre-Series A, Series A, Series B, Series C). Assume "Pre-Seed" if not found from images and the company is new. If not found, say "not available".
+        9. **lastFundingYear**: The year of the most recent funding round. If not found, say "not available".
+        10. **nextFundingRound**: The next planned funding round explicitly mentioned. If the last funding round is available but the next funding round is not explicitly mentioned, use the following logic: 
+        - If the last funding round is Pre-Seed, the next funding round is Seed.
+        - If the last funding round is Seed, the next funding round is Pre-Series A.
+        - If the last funding round is Pre-Series A, the next funding round is Series A.
+        - If the last funding round is Series A, the next funding round is Series B.
+        - If the last funding round is Series B, the next funding round is Series C.
+        - If the last funding round is Series C, respond with "not available".
+        If both last and next funding rounds are not found, respond with "not available".
+        11. **nextFundingTarget**: The target amount for the next funding round converted to USD. If nextFundingTarget is converted to USD, give only the USD value. If not found, say "not available".
+        12. **latestMonthlyRevenue**: The latest monthly revenue figure converted to USD. If MRR is not available and revenue is present then divide revenue with 12 and consider as MRR then convert it to USD. If MRR is converted to USD, give only the USD value. If both MRR and revenue is not found, say "not available".
+        13. **revenue**: The company's annual revenue (ARR) converted to USD. If revenue is not available and Monthly Recurring Revenue (MRR) is found, multiply by 12 and consider as revenue then convert it to USD.If revenue is converted to USD, give only the USD value. If both revenue and MRR is not found, say "not available".
+        14. **currency**: Use USD if the revenue, MRR and next funding target is converted to USD.If not converted use the currency with revenue figures. If not found, say "not available".
+        15. **website**: If the company's website URL is explicitly mentioned, extract and provide it. If website URL is not explicitly mentioned but one of the domain based business email address is present, then infer this domain as the website url ( like email@example.com then website will be example.com ). I repeat that you can only infer website url from email only if the email address is a business email address based on the company's domain. If not found, say "not available".
+        16. **socialMedia**: Links to the company's social media profiles, which are explicitly mentioned. If not found, say "not available".
+        17. **demo**: A link to the company's demo video, which is explicitly mentioned. If not found, say "not available".`,
+      },
+      {
+        role: 'system',
+        content: `Use your last updated values for currency conversion`,
+      },
+      {
+        role: 'system',
+        content: `Always prioritize accuracy. If you are not sure about a detail, respond with "not available".`,
+      },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: 'Each page of the pitch deck is here. Extract the described details from these images:',
+          },
+          ...urls.map((url) => ({
+            type: 'image_url',
+            image_url: {
+              url,
+            },
+          })),
+        ],
+      },
+    ],
+  });
+  const answer = response.choices[0].message.content;
+  console.log(answer);
+  return answer.trim().replace(/\n/g, ' ');
+}
+function buffersToUrls(bufferArray) {
+  const base64Strings = bufferArray.map((buffer) => buffer.toString('base64'));
+  return base64Strings.map((base64) => `data:image/jpeg;base64,${base64}`);
 }
 async function extractRequestData(context, file) {
   try {
@@ -424,3 +462,27 @@ function formatISODateToCustom(isoString) {
   // Format the result as "MMM - YYYY"
   return `${monthAbbreviations[month]} - ${year}`;
 }
+const uploadToCloud = async (buffer) => {
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.v2.uploader.upload_stream(
+      { folder: 'convertedPitches' },
+      (error, result) => {
+        if (error) {
+          return reject('Files connot be uploaded');
+        }
+        resolve(result);
+      }
+    );
+    uploadStream.end(buffer);
+  });
+};
+const deleteFromCloud = async (publicId) => {
+  return new Promise((resolve, reject) => {
+    cloudinary.v2.uploader.destroy(publicId, (error, result) => {
+      if (error) {
+        return reject('File cannot be deleted');
+      }
+      resolve(result);
+    });
+  });
+};
