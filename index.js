@@ -1,11 +1,11 @@
 const OpenAI = require('openai');
 const fs = require('fs');
-const pdftopic = require('pdftopic');
 const path = require('path');
+const pdftopic = require('pdftopic');
 const Papa = require('papaparse');
-const dotenv=require('dotenv')
-dotenv.config()
-const openAiapiKey = process.env.OPENAI_API_KEY
+const dotenv = require('dotenv');
+dotenv.config();
+const openAiapiKey = process.env.OPENAI_API_KEY;
 
 const main = async () => {
   const startTime = logCurrentTime();
@@ -57,12 +57,11 @@ async function convertToBase64Strings(pdfPath) {
     .then((buffers) => buffers.map((buffer) => buffer.toString('base64')));
 }
 const defaultCsvHeaders = {
+  file: 'N/A',
   companyName: 'N/A',
   description: 'N/A',
   marketType: 'N/A',
   keywords: 'N/A',
-  revenue: 'N/A',
-  currency: 'N/A',
   founded: 'N/A',
   countryOfOrigin: 'N/A',
   countryOfOperation: 'N/A',
@@ -71,11 +70,12 @@ const defaultCsvHeaders = {
   nextFundingRound: 'N/A',
   nextFundingTarget: 'N/A',
   latestMonthlyRevenue: 'N/A',
+  revenue: 'N/A',
+  currency: 'N/A',
   website: 'N/A',
   socialMedia: 'N/A',
   demo: 'N/A',
   inputContext: 'N/A',
-  file: 'N/A',
 };
 async function extractPdfContextWithAi(base64Strings, file) {
   try {
@@ -88,52 +88,54 @@ async function extractPdfContextWithAi(base64Strings, file) {
         {
           role: 'system',
           content:
-            'You are an information collecting tool from the pitchdeck of a company',
+            'You are an advanced information extraction assistant. Your task is to extract specific details from the pitch decks of companies. The information you provide will be used by venture capitals to assess potential investments. Ensure each detail is 100% accurate, and if you are unsure about the accuracy, respond with "not available".',
         },
         {
           role: 'system',
-          content: `The informations found by you will be used by the venture capitals to find the portfolio company is a good match for them to invest`,
+          content: `The pitch decks may contain textual, graphical, and visual representations. Interpret all forms of content while generating your response. Never guess or provide inaccurate details.`,
         },
         {
           role: 'system',
-          content: `The pitchdeck might contain graphical representaions, visual representation and textual representation , interpret all the representations while generating the response`,
+          content: `You need to find the following details from the images. If you cannot find a detail or if you are not 100% sure about its accuracy, respond with "not available":
+          1. **companyName**: The name of the company. Do not guess; if not found, say "not available".
+          2. **description**: A description of the company based on the context of all images. Create a comprehensive summary if possible.
+          3. **marketType**: Identify if the company targets B2B, B2C, or both. Make an educated guess based on offerings, audience, and channels if not explicitly mentioned. If unsure, say "not available".
+          4. **keywords**: An array of relevant keywords (e.g., Aerospace, AI, Fintech). If no keywords are found, say "not available".
+          5. **countryOfOrigin**: The country where the company was founded. Use full country names (e.g., United Kingdom, United States of America). If not found, say "not available".
+          6. **countryOfOperation**: An array of countries where the company operates. Use full country names. If no country of operation is found, say "not available".
+          7. **founded**: The date the company was founded. If not found, say "not available".
+          8. **lastFundingRound**: The most recent funding round (e.g., Pre-Seed, Seed, Pre-Series A, Series A, Series B, Series C). Assume "Pre-Seed" if not found from images and the company is new. If not found, say "not available".
+          9. **lastFundingYear**: The year of the most recent funding round. If not found, say "not available".
+          10. **nextFundingRound**: The next planned funding round explicitly mentioned. If the last funding round is available but the next funding round is not explicitly mentioned, use the following logic: 
+          - If the last funding round is Pre-Seed, the next funding round is Seed.
+          - If the last funding round is Seed, the next funding round is Pre-Series A.
+          - If the last funding round is Pre-Series A, the next funding round is Series A.
+          - If the last funding round is Series A, the next funding round is Series B.
+          - If the last funding round is Series B, the next funding round is Series C.
+          - If the last funding round is Series C, respond with "not available".
+          If both last and next funding rounds are not found, respond with "not available".
+          11. **nextFundingTarget**: The target amount for the next funding round converted to USD. If nextFundingTarget is converted to USD, give only the USD value. If not found, say "not available".
+          12. **latestMonthlyRevenue**: The latest monthly revenue figure converted to USD. If MRR is not available and revenue is present then divide revenue with 12 and consider as MRR then convert it to USD. If MRR is converted to USD, give only the USD value. If both MRR and revenue is not found, say "not available".
+          13. **revenue**: The company's annual revenue (ARR) converted to USD. If revenue is not available and Monthly Recurring Revenue (MRR) is found, multiply by 12 and consider as revenue then convert it to USD.If revenue is converted to USD, give only the USD value. If both revenue and MRR is not found, say "not available".
+          14. **currency**: Use USD if the revenue, MRR and next funding target is converted to USD.If not converted use the currency with revenue figures. If not found, say "not available".
+          15. **website**: If the company's website URL is explicitly mentioned, extract and provide it. If website URL is not explicitly mentioned but one of the domain based business email address is present, then infer this domain as the website url ( like email@example.com then website will be example.com ). I repeat that you can only infer website url from email only if the email address is a business email address based on the company's domain. If not found, say "not available".
+          16. **socialMedia**: Links to the company's social media profiles, which are explicitly mentioned. If not found, say "not available".
+          17. **demo**: A link to the company's demo video, which is explicitly mentioned. If not found, say "not available".`,
         },
         {
           role: 'system',
-          content: `The details to find from the images are :-
-        1. companyName is the name of the company, never guess the name , if you cannot find say not available.
-        2. description is the description about the company ( you can create a good description by your own from the context of all images ).
-        3. marketType is the market the company focuses on. Determine whether the company primarily targets business-to-business (B2B), business-to-consumer (B2C), or both. Make an educated guess based on the detailed description of the company's offerings, target audience, distribution channels, and sales approach if the market type is not explicitly mentioned in the context. Consider factors such as the nature of the product/service, customer demographics, and intended market reach to accurately suggest the market type, even after you connot find the market type say not available.
-        4. keywords is the array of keywords fitting for the company. For example: Aerospace, AI, Fintech, AdTech, try to capture keywords from the words that would be relevant for a venture capitalist to evaluate a startup, if you cannot extract any keywords return and empty array.
-        5. revenue is the revenue or ARR (Annual Recurring Revenue) of the company, if you find Monthly Recurring Revenue just multiply that value with 12, don't give wrong or hallucinating data. if you can't find anything, just say not available.
-        6. latestMonthlyRevenue latest monthly revenue is the latest monthly revenue of the company explicitly mentioned in the context, if you cannot find say not available.
-        7. currency is the currency in which the annual revenue or latest monthly revenue is mentioned, if you cannot find say not available.
-        8. countryOfOrigin is the country of origin of the company or where the company is originated from, never use short forms of the countries instead use the full form , example United kingdom for UK, United state of America for USA , United Arab Emirites for UAE etc...
-        9. countryOfOperation is the array of countries where the company is functioning.
-        10. founded is date of incorporation of the company.
-        11. lastFundingRound is the last funding round of the company where the investment stage of the company. Look for indications of funding rounds mentioned in the pitch deck or reflected in the file name, such as seed funding, Series A, Series B, etc. Prioritize extracting specific funding details or milestones mentioned in the pitch deck to infer the investment stage accurately.if you can't find anything then assume that it's a New Startup and return "Pre-Seed", if you cannot find say not available.
-        12. lastFundingYear is the date where the last funding round done, if you cannot find say not available.
-        13. nextFundingRound is the next funding round, which the company is planning to get investments, if you cannot find say not available.
-        14. nextFundingTarget is the targeted investment of the company in the next funding round, if you cannot find say not available.
-        15. website is the marketing website of the company.
-        16. socialMedia is the social media link of the company.
-        17. demo is the link to the demo vedio of the company explicitly mentioned in the context.`,
+          content: `Use your last updated values for currency conversion`,
         },
         {
           role: 'system',
-          content:
-            'Keep in mind that never guess and give a random answer, if you cannot find the information just say is not availible',
-        },
-        {
-          role: 'system',
-          content: 'Each page will be given to you as images',
+          content: `Always prioritize accuracy. If you are not sure about a detail, respond with "not available".`,
         },
         {
           role: 'user',
           content: [
             {
               type: 'text',
-              text: 'Each page of the pitchdeck are here, find the details described',
+              text: 'Each page of the pitch deck is here. Extract the described details from these images:',
             },
             ...base64Strings.map((base64) => ({
               type: 'image_url',
@@ -146,6 +148,7 @@ async function extractPdfContextWithAi(base64Strings, file) {
       ],
     });
     const answer = response.choices[0].message.content;
+    console.log(answer);
     return answer.trim().replace(/\n/g, ' ');
   } catch (error) {
     console.log('\n' + 'Error while context extraction of ' + file);
@@ -162,76 +165,18 @@ async function extractRequestData(context, file) {
       messages: [
         {
           role: 'system',
-          content: `Context to analyse is ${context}`,
-        },
-
-        {
-          role: 'system',
-          content: `The informations found by you will be used by the venture capitals to find the portfolio company is a good match for them to invest`,
-        },
-        {
-          role: 'system',
-          content: `I will mention which are the informations you have to find from the context, and the informations must be given in json format, because the response you given will be used as the argument for the typescript method JSON.parse() immediatly without any alteration, so be carefull when giving the output and it must not cause the code flow to break`,
-        },
-        {
-          role: 'system',
-          content: `The respose must be in the following json format {
-                  "companyName":name of company,
-                  "description": description of company,
-                  "marketType": market type of company,
-                  "keywords": array of  keywords suitable for the company,
-                  "revenue": revenue of company,
-                  "latestMonthlyRevenue":latest monthly revenue,
-                  "currency":currency where the revenue is described,
-                  "countryOfOrigin": country of company where it initially founded,
-                  "countryOfOperation":countries where the company is functioning,
-                  "founded": date at which the company is founded,
-                  "lastFundingRound":last funding round,
-                  "lastFundingYear":last funding year,
-                  "nextFundingRound":next funding round,
-                  "nextFundingTarget":next funding target in millions,
-                  "website":website of the company,
-                  "socialMedia":social media link,
-                  "demo":demo link
-                  }`,
-        },
-        {
-          role: 'system',
           content:
-            'Keep in mind that never guess and give a random answer, if you cannot find the information just give the value as null',
-        },
-        {
-          role: 'system',
-          content: `Explanation for each key in the format as follows:-
-                1. companyName is the name of the company, never guess the name , if you cannot find it give it as null.
-                2. description is the description about the company ( you can create a good description by your own from the context only at this field ).
-                3. marketType is the market the company focuses on. Determine whether the company primarily targets business-to-business (B2B), business-to-consumer (B2C), or both. Make an educated guess based on the detailed description of the company's offerings, target audience, distribution channels, and sales approach if the market type is not explicitly mentioned in the context. Consider factors such as the nature of the product/service, customer demographics, and intended market reach to accurately suggest the market type, if you connot extract the market type return null.
-                4. keywords is the keywords fitting for the company. For example: Aerospace, AI, Fintech, AdTech, try to capture keywords from the words that would be relevant for a venture capitalist to evaluate a startup, if you cannot extract any keywords return and empty array.
-                5. revenue is the revenue or ARR (Annual Recurring Revenue) of the company, if you find Monthly Recurring Revenue just multiply that value with 12,if you can't find anything, just assume as 0 for now, don't give wrong or hallucinating data. If you find any foreign currency, try to change it to USD, ensure to give this answer in us dollars.
-                6. latestMonthlyRevenue latest monthly revenue is the latest monthly revenue of the company explicitly mentinoed in the context.
-                7. currency is the currency in which the revenue is mentioned, if the revenue is converted to dollars use USD as currency.
-                8. countryOfOrigin is the country of origin of the company or where the company is originated from, never use short forms of the countries instead use the full form , example United kingdom for UK, United state of America for USA , United Arab Emirites for UAE etc...
-                9. countryOfOperation is the array of countries where the company is functioning.
-                10. founded is date of incorporation of the company. find the date and give it as an ISO string.
-                11. lastFundingRound is the last funding round of the company where the investment stage of the company. Look for indications of funding rounds mentioned in the pitch deck or reflected in the file name, such as seed funding, Series A, Series B, etc. Prioritize extracting specific funding details or milestones mentioned in the pitch deck to infer the investment stage accurately.if you can't find anything then assume that it's a New Startup and return "Pre-Seed", don't give wrong data.
-                12. lastFundingYear is the date where the last funding round done. find the date and give it as an ISO string.
-                13. nextFundingRound is the next funding round, which the company is planning to get investments.
-                14. nextFundingTarget is the targeted investment of the company in the next funding round in millions and give the value as a number.
-                15. website is the marketing website of the company.
-                16. socialMedia is the social media link of the company.
-                17. demo is the link to the demo vedio of the company explicitly mentioned in the context.`,
+            'You are a tool which find details from a context and transform these details to a specific json format',
         },
 
         {
           role: 'system',
-          content: `The type of the parsed Json must be 
+          content: `Required json format is  
                 {
                   "companyName":string | null;
                   "description": string | null;
                   "marketType": string | null;
                   "keywords": string[];
-                  "revenue": number | null;
-                  "currency":string | null;
                   "countryOfOrigin": string | null;
                   "countryOfOperation":string[];
                   "founded":string | null;
@@ -240,33 +185,110 @@ async function extractRequestData(context, file) {
                   "nextFundingRound":string | null;
                   "nextFundingTarget":number | null; 
                   "latestMonthlyRevenue":number | null;
+                  "revenue": number | null;
+                  "currency":string | null;
                   "website":string | null;
                   "socialMedia":string | null;
                   "demo":string | null;
-                }`,
+                }
+                
+                `,
+        },
+        {
+          role: 'system',
+          content: `Explanation for each key in the json format as follows:-
+          1. companyName:  The name of the company. Do not guess, if not found or not 100% sure return null".
+          2. description:  A description of the company based on the context of all images. Create a comprehensive summary if possible.
+          3. marketType:  Identify if the company targets B2B, B2C, or both. Make an educated guess based on offerings, audience, and channels if not explicitly mentioned, if not found or not 100% sure return null".
+          4. keywords:  An array of relevant keywords (e.g., Aerospace, AI, Fintech). If no keywords are found return []".
+          5. countryOfOrigin:  The country where the company was founded. Use full country names (e.g., United Kingdom, United States of America), if not found or not 100% sure return null".
+          6. countryOfOperation:  An array of countries where the company operates. Use full country names. If no country of operation is found, if not found or not 100% return []".
+          7. founded:  The date the company was founded as an ISO string ( ie. if founded in 2020 the value will be 2020-01-01T00:00:00 ), if not found or not 100% sure return null".
+          8. lastFundingRound:  The most recent funding round (e.g., Pre-Seed, Seed, Pre-Series A, Series A, Series B, Series C). Assume "Pre-Seed" if not found from images and the company is new, if not found or not 100% sure return null".
+          9. lastFundingYear:  The year of the most recent funding round as an ISO string ( ie. if the last funding year is 2021 june the value will be 2021-06-01T00:00:00 ), if not found or not 100% sure return null".
+          10. nextFundingRound:  The next planned funding round explicitly mentioned. If the last funding round is available but the next funding round is not explicitly mentioned, use the following logic:  
+          - If the last funding round is Pre-Seed, the next funding round is Seed.
+          - If the last funding round is Seed, the next funding round is Pre-Series A.
+          - If the last funding round is Pre-Series A, the next funding round is Series A.
+          - If the last funding round is Series A, the next funding round is Series B.
+          - If the last funding round is Series B, the next funding round is Series C.
+          - If the last funding round is Series C, respond with "not available".
+          If both last and next funding rounds are not found or 100% sure return null".
+          11. nextFundingTarget:  The target amount for the next funding round in millions ( ie. if the next funding taget is found as 3000000 USD the value of the field will be 3 ), if not found or not 100% sure return null.
+          12. latestMonthlyRevenue:  The latest monthly revenue figure as an absolute value. If MRR is not available and revenue is present then divide revenue with 12 and consider as MRR then give it as an absolute value (ie. if the revenue is 1500000 USD of 1.5 million USD the value of the revenue field will be 1500000). If both MRR and revenue are not found or 100% sure return null.
+          13. revenue:  The company's annual revenue (ARR) as an absolute value. If revenue is not available and Monthly Recurring Revenue (MRR) is found, multiply by 12 and consider as revenue then give it as an absolute value (ie. if the MRR is 500000 USD of 0.5 million USD the value of the revenue field will be 500000). If both revenue and MRR are not found or 100% sure return null.
+          14. currency:  It is the currency mentioned with revenue ,MRR and next funding target, if not found or not 100% sure return null.
+          15. website:  If the company's website URL is explicitly mentioned, extract and provide it. If website URL is not explicitly mentioned but one of the domain based business email address is present, then infer this domain as the website url ( like email@example.com then website will be example.com ). I repeat that you can only infer website url from email only if the email address is a business email address based on the company's domain, if not found or not 100% sure return null.
+          16. socialMedia:  Links to the company's social media profiles, which are explicitly mentioned, if not found or not 100% sure return null.
+          17. demo:  A link to the company's demo video, which is explicitly mentioned, if not found or not 100% sure return null.`,
         },
 
+        {
+          role: 'system',
+          content: `The response must be in json format, because the response you given will be used as the argument for the typescript method JSON.parse() immediatly without any alteration, so be carefull when giving the output and it must not cause the code flow to break
+                a sample response which have all the details available will be like
+                {
+                  "companyName":"Example company",
+                  "description": "An example of description blah blah blah.",
+                  "marketType": "B2B",
+                  "keywords": ["keyword1","keyword2","keyword3","keyord4"],
+                  "countryOfOrigin": "United Kingdom",
+                  "countryOfOperation":["United Kingdom", "United State of America", "Germany", "India"],
+                  "founded":"2021-06-01T00:00:00",
+                  "lastFundingRound":"Series-B",
+                  "lastFundingYear":"2023-06-01T00:00:00",
+                  "nextFundingRound":"Series-C",
+                  "nextFundingTarget": 2, 
+                  "latestMonthlyRevenue":150400,
+                  "revenue": 1204800,
+                  "currency": "USD",
+                  "website":"https://samplecompany.com",
+                  "socialMedia":"https://socialmedia.com/blahblah/blah",
+                  "demo":"https://somedomain.com/blahblah/blah"
+                }
+                a sample response which have no details available will be like
+                {
+                  "companyName":null,
+                  "description": null,
+                  "marketType": null,
+                  "keywords": [],
+                  "countryOfOrigin": null,
+                  "countryOfOperation":[],
+                  "founded":null,
+                  "lastFundingRound":null,
+                  "lastFundingYear":null,
+                  "nextFundingRound":null,
+                  "nextFundingTarget": null, 
+                  "latestMonthlyRevenue":null,
+                  "revenue": null,
+                  "currency": null,
+                  "website":null,
+                  "socialMedia":null,
+                  "demo":null
+                }
+                `,
+        },
+        {
+          role: 'system',
+          content:
+            'Keep in mind that never guess and give random answers, if you cannot find or not 100% sure about a specific details just give the value as null',
+        },
+        {
+          role: 'system',
+          content: `Context to analyse is ${context}`,
+        },
         {
           role: 'system',
           content: `I repeat the response will be immediately used as the argument for JSON.parse() method with out any alteration. So the response must be in json format where it start with open curly braze in the start and closing curly braze in the end, a different kind of response is not allowed`,
         },
         {
           role: 'system',
-          content: `You might not be able to find all the details, if you cannot find the data give it as null`,
-        },
-        {
-          role: 'system',
-          content: `try to cross check each information is correct from the context, do this crosscheck three times and give the most accurate output`,
-        },
-
-        {
-          role: 'system',
-          content: `Analyse and give the output`,
+          content: `Analyse and give the output in json format`,
         },
       ],
       model: 'gpt-4-turbo',
     });
-    
+
     const answer = chatCompletion.choices[0].message.content;
     const jsonRegex = /\{[\s\S]*?\}/;
     const jsonString = answer.match(jsonRegex);
@@ -276,8 +298,6 @@ async function extractRequestData(context, file) {
       description: '',
       marketType: '',
       keywords: [''],
-      revenue: 0,
-      currency: '',
       founded: '',
       countryOfOrigin: '',
       countryOfOperation: [''],
@@ -286,6 +306,8 @@ async function extractRequestData(context, file) {
       nextFundingRound: '',
       nextFundingTarget: 0,
       latestMonthlyRevenue: 0,
+      revenue: 0,
+      currency: '',
       website: '',
       socialMedia: '',
       demo: '',
