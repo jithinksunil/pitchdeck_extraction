@@ -83,7 +83,7 @@ const defaultCsvHeaders = {
 };
 async function extractPdfContextWithAi(bufferArray, file) {
   try {
-    const urls = buffersToUrls(bufferArray.sv.jithin);
+    const urls = buffersToUrls(bufferArray);
     return await contextExtractionPrompts(urls);
   } catch (error) {
     console.log(error);
